@@ -1,0 +1,338 @@
+#include <string>
+#include <sys/utime.h>
+
+#include <opencv2/core/core.hpp>
+//#include <opencv2/videoio/videoio.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+
+#include "imgproc.cuh"
+
+__global__ void kernel(unsigned char* d_in, unsigned char* d_out){
+	int idx = blockIdx.x;
+	int idy = threadIdx.x;
+
+	int gray_adr = idx * 64 + idy;    // calculating address for writing grayscale value
+	int clr_adr = 3 * gray_adr;       // calculating address for reading RGB values--
+
+	if (gray_adr<(64 * 64))
+	{
+		double gray_val = 0.144*d_in[clr_adr] + 0.587*d_in[clr_adr + 1] + 0.299*d_in[clr_adr + 2];
+		d_out[gray_adr] = (unsigned char)gray_val;
+		//printf(" %d:%d=[%d,%d,%d,%d] \n", idx,idy,d_in[clr_adr],d_in[clr_adr+1],d_in[clr_adr+2],(int)gray_val);
+	}
+}
+
+//   Kernel Calling Function
+
+extern "C" void gray_parallel(unsigned char* h_in, unsigned char* h_out, int elems, int rows, int cols){
+
+	unsigned char* d_in;
+	unsigned char* d_out;
+	cudaMalloc((void**)&d_in, elems);
+	cudaMalloc((void**)&d_out, rows*cols);
+
+	cudaMemcpy(d_in, h_in, elems*sizeof(unsigned char), cudaMemcpyHostToDevice);
+	kernel << <rows, cols >> >(d_out, d_in);
+
+	cudaMemcpy(h_out, d_out, rows*cols*sizeof(unsigned char), cudaMemcpyDeviceToHost);
+	cudaFree(d_in);
+	cudaFree(d_out);
+}
+
+
+
+//      Main Function
+
+int main(int argc, char** argv)
+{
+	cv::Mat image;
+	image = cv::imread("img.jpg");	// Read the file, it is simple 64x64 image. 
+
+	//         Now trying GPU code
+	const int rows = image.rows;
+	const int cols = image.cols;
+	int elems = rows*cols * 3;
+	unsigned char *h_in = image.data;
+	unsigned char *h_out = new unsigned char[rows*cols];
+
+	gray_parallel(h_in, h_out, elems, rows, cols);
+
+	cv::Mat gray2 = cv::Mat(rows, cols, CV_8UC1, h_out);
+	
+
+	// Finally display result of GPU code (CPU code works fine, but not GPU code)
+	//cv::namedWindow("Display window", cv::WINDOW_AUTOSIZE);
+	imshow("image.jpg", gray2);
+	//cv::waitKey(0);
+	system("pause");
+	return 0;
+
+}
+/*
+__global__
+void rgbaToGreyscaleCudaKernel(const uchar4* const rgbaImage,
+unsigned char* const greyImage,
+const int numRows, const int numCols)
+{
+	//First create a mapping from the 2D block and grid locations
+	//to an absolute 2D location in the image, then use that to
+	//calculate a 1D offset
+	const long pointIndex = threadIdx.x + blockDim.x*blockIdx.x;
+
+	if (pointIndex<numRows*numCols) { // this is necessary only if too many threads are started
+		uchar4 const imagePoint = rgbaImage[pointIndex];
+		greyImage[pointIndex] = .299f*imagePoint.x + .587f*imagePoint.y + .114f*imagePoint.z;
+	}
+}
+
+// Parallel implementation for running on GPU using multiple threads.
+void rgbaToGreyscaleCuda(const uchar4 * const h_rgbaImage, uchar4 * const d_rgbaImage,
+	unsigned char* const d_greyImage, const size_t numRows, const size_t numCols)
+{
+	const int blockThreadSize = 512;
+	const int numberOfBlocks = 1 + ((numRows*numCols - 1) / blockThreadSize); // a/b rounded up
+	const dim3 blockSize(blockThreadSize, 1, 1);
+	const dim3 gridSize(numberOfBlocks, 1, 1);
+	rgbaToGreyscaleCudaKernel << <gridSize, blockSize >> >(d_rgbaImage, d_greyImage, numRows, numCols);
+}
+
+// Serial implementation for running on CPU using a single thread.
+void rgbaToGreyscaleCpu(const uchar4* const rgbaImage, unsigned char *const greyImage,
+	const size_t numRows, const size_t numCols)
+{
+	for (size_t r = 0; r < numRows; ++r) {
+		for (size_t c = 0; c < numCols; ++c) {
+			const uchar4 rgba = rgbaImage[r * numCols + c];
+			const float channelSum = .299f * rgba.x + .587f * rgba.y + .114f * rgba.z;
+			greyImage[r * numCols + c] = channelSum;
+		}
+	}
+}
+
+int main(int argc, char **argv) {
+
+	std::string input_file;
+	std::string output_cuda_file  = "../data/output_cuda.png";
+	std::string output_opencv_file = "../data/output_opencv.png";
+	std::string output_cpu_file = "../data/output_cpu.png";
+
+	// used for the allowed error between different implementations
+	bool useEpsCheck = true; // set true to enable perPixelError and globalError
+	double perPixelError = 3;
+	double globalError   = 10;
+
+	switch (argc)
+	{
+	case 2:
+		input_file = std::string(argv[1]);
+		break;
+	case 3:
+		input_file  = std::string(argv[1]);
+		output_cuda_file = std::string(argv[2]);
+		break;
+	case 4:
+		input_file  = std::string(argv[1]);
+		output_cuda_file = std::string(argv[2]);
+		output_opencv_file = std::string(argv[3]);
+		break;
+	case 5:
+		input_file  = std::string(argv[1]);
+		output_cuda_file = std::string(argv[2]);
+		output_opencv_file = std::string(argv[3]);
+		output_cpu_file = std::string(argv[4]);
+		break;
+	case 7:
+		useEpsCheck=true;
+		input_file  = std::string(argv[1]);
+		output_cuda_file = std::string(argv[2]);
+		output_opencv_file = std::string(argv[3]);
+		output_cpu_file = std::string(argv[4]);
+		perPixelError = atof(argv[5]);
+		globalError   = atof(argv[6]);
+		break;
+	default:
+		std::cerr << "Usage: ./grayscale input_file [output_cuda] [output_opencv] [output_opencv] [output_cpu] [globalError]" << std::endl;
+		exit(1);
+	}
+
+	for (int i=0; i<10; ++i) {
+		processUsingOpenCV(input_file, output_opencv_file);
+		processUsingCuda(input_file, output_cuda_file);
+	}
+
+	
+
+	return 0;
+}
+
+
+void preProcess(uchar4 **inputImage, unsigned char **greyImage,
+	uchar4 **d_rgbaImage, unsigned char **d_greyImage,
+	const std::string &filename) {
+	//make sure the context initializes ok
+
+	cv::Mat image;
+	image = cv::imread(filename.c_str(), CV_LOAD_IMAGE_COLOR);
+	if (image.empty()) {
+		std::cerr << "Couldn't open file: " << filename << std::endl;
+		exit(1);
+	}
+
+	cv::cvtColor(image, imageRGBA, CV_BGR2RGBA);  // CV_BGR2GRAY
+
+	//allocate memory for the output
+	imageGrey.create(image.rows, image.cols, CV_8UC1);
+
+	//This shouldn't ever happen given the way the images are created
+	//at least based upon my limited understanding of OpenCV, but better to check
+	if (!imageRGBA.isContinuous() || !imageGrey.isContinuous()) {
+		std::cerr << "Images aren't continuous!! Exiting." << std::endl;
+		exit(1);
+	}
+
+	*inputImage = (uchar4 *)imageRGBA.ptr<unsigned char>(0);
+	*greyImage = imageGrey.ptr<unsigned char>(0);
+
+	const size_t numPixels = numRows() * numCols();
+	//allocate memory on the device for both input and output
+	checkCudaErrors(cudaMalloc(d_rgbaImage, sizeof(uchar4)* numPixels));
+	checkCudaErrors(cudaMalloc(d_greyImage, sizeof(unsigned char)* numPixels));
+	checkCudaErrors(cudaMemset(*d_greyImage, 0, numPixels * sizeof(unsigned char))); //make sure no memory is left laying around
+
+	//copy input array to the GPU
+	checkCudaErrors(cudaMemcpy(*d_rgbaImage, *inputImage, sizeof(uchar4)* numPixels, cudaMemcpyHostToDevice));
+
+	d_rgbaImage__ = *d_rgbaImage;
+	d_greyImage__ = *d_greyImage;
+}
+
+void postProcess(const std::string& output_file, unsigned char* data_ptr) {
+	cv::Mat output(numRows(), numCols(), CV_8UC1, (void*)data_ptr);
+
+	//output the image
+	cv::imwrite(output_file.c_str(), output);
+}
+
+void cleanupCuda()
+{
+	//cleanup
+	cudaFree(d_rgbaImage__);
+	cudaFree(d_greyImage__);
+	cudaDeviceReset();
+}
+
+
+void generateReferenceImage(std::string input_filename, std::string output_filename)
+{
+	cv::Mat reference = cv::imread(input_filename, CV_LOAD_IMAGE_GRAYSCALE);
+
+	cv::imwrite(output_filename, reference);
+
+}
+
+
+void processUsingCuda(std::string input_file, std::string output_file) {
+	// pointers to images in CPU's memory (h_) and GPU's memory (d_)
+	uchar4        *h_rgbaImage, *d_rgbaImage;
+	unsigned char *h_greyImage, *d_greyImage;
+
+	//load the image and give us our input and output pointers
+	preProcess(&h_rgbaImage, &h_greyImage, &d_rgbaImage, &d_greyImage, input_file);
+
+	// here is where the conversion actually happens
+	rgbaToGreyscaleCuda(h_rgbaImage, d_rgbaImage, d_greyImage, numRows(), numCols());
+	cudaDeviceSynchronize();
+
+	int err = printf("Implemented CUDA code ran in: %f msecs.\n", timer.Elapsed());
+
+	if (err < 0) {
+		//Couldn't print!
+		std::cerr << "Couldn't print timing information! STDOUT Closed!" << std::endl;
+		exit(1);
+	}
+
+	size_t numPixels = numRows()*numCols();
+
+	//check results and output the grey image
+}
+
+void processUsingOpenCV(std::string input_file, std::string output_file) {
+	cv::Mat image;
+	image = cv::imread(input_file.c_str(), CV_LOAD_IMAGE_COLOR);
+	if (image.empty()) {
+		std::cerr << "Couldn't open file: " << input_file << std::endl;
+		exit(1);
+	}
+
+	GpuTimer timer;
+	timer.Start();
+	cv::cvtColor(image, imageRGBA, CV_BGR2RGBA);  // CV_BGR2GRAY
+
+	//allocate memory for the output
+	imageGrey.create(image.rows, image.cols, CV_8UC1);
+	timer.Stop();
+
+	int err = printf("OpenCV code ran in: %f msecs.\n", timer.Elapsed());
+
+	//This shouldn't ever happen given the way the images are created
+	//at least based upon my limited understanding of OpenCV, but better to check
+	if (!imageRGBA.isContinuous() || !imageGrey.isContinuous()) {
+		std::cerr << "Images aren't continuous!! Exiting." << std::endl;
+		exit(1);
+	}
+
+	//output the image
+	cv::imwrite(output_file.c_str(), imageGrey);
+}
+
+/*
+int main()
+{
+	// open web camera
+	cv::VideoCapture camera(0);
+	cv::Mat frame;
+
+	if (!camera.isOpened())
+		return -1;
+	camera.set(CV_CAP_PROP_FRAME_WIDTH, 640);
+	camera.set(CV_CAP_PROP_FRAME_HEIGHT, 480);
+
+	camera >> frame;
+
+	cv::Mat sGray(frame.size(), CV_8U, createImageBuffer(frame.size().width * frame.size().height));
+	cv::Mat dGray(frame.size(), CV_8U, createImageBuffer(frame.size().width * frame.size().height));
+	cv::Mat eGray(frame.size(), CV_8U, createImageBuffer(frame.size().width * frame.size().height));
+
+	cv::cvtColor(frame, dGray, CV_BGR2GRAY);
+	cv::cvtColor(frame, sGray, CV_BGR2GRAY);
+	cv::cvtColor(frame, eGray, CV_BGR2GRAY);
+
+	cv::namedWindow("Source");
+	cv::namedWindow("GreyScale");
+	cv::namedWindow("Blurred");
+	//cv::namedWindow("Sobel");
+
+	while (1)
+	{
+		camera >> frame;
+		cv::cvtColor(frame, sGray, CV_BGR2GRAY);
+
+		boxfilter(frame.size().width, frame.size().height, sGray.data, dGray.data, 3, 3);
+		//sobefilter(frame.size().width, frame.size().height, dGray.data, eGray.data);
+
+		cv::imshow("Source", frame);
+		cv::imshow("GreyScale", sGray);
+		cv::imshow("Blurred", dGray);
+		//cv::imshow("Sobel", eGray);
+
+	}
+
+	destroyImageBuffer(sGray.data);
+	destroyImageBuffer(dGray.data);
+	destroyImageBuffer(eGray.data);
+
+	return 0;
+
+}
+*/

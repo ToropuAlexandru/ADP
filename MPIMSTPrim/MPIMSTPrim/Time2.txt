@@ -1,0 +1,48 @@
+ Number of processors: 1
+ Number of vertices: 6
+ Time of execution: 0.000461
+
+ Number of processors: 1
+ Number of vertices: 6
+ Time of execution: 0.000012
+
+ Number of processors: 1
+ Number of vertices: 6
+ Time of execution: 0.000012
+
+ Number of processors: 1
+ Number of vertices: 6
+ Time of execution: 0.000012
+
+ Number of processors: 1
+ Number of vertices: 6
+ Time of execution: 0.000016
+
+ Number of processors: 1
+ Number of vertices: 6
+ Time of execution: 0.000013
+
+ Number of processors: 1
+ Number of vertices: 6
+ Time of execution: 0.000018
+
+ Number of processors: 1
+ Number of vertices: 5
+ Time of execution: 0.000011
+
+ Number of processors: 1
+ Number of vertices: 5
+ Time of execution: 0.000012
+
+ Number of processors: 1
+ Number of vertices: 5
+ Time of execution: 0.000017
+
+ Number of processors: 1
+ Number of vertices: 5
+ Time of execution: 0.000010
+
+ Number of processors: 1
+ Number of vertices: 5
+ Time of execution: 0.000013
+
